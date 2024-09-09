@@ -37,6 +37,7 @@
 #include "g2o/core/batch_stats.h"
 #include "g2o/core/block_solver.h"
 #include "g2o/core/optimization_algorithm_levenberg.h"
+#include <g2o/core/sparse_optimizer_terminate_action.h>
 #include "g2o/core/solver.h"
 #include "g2o/core/sparse_optimizer.h"
 #include "g2o/solvers/pcg/linear_solver_pcg.h"
@@ -402,6 +403,11 @@ int main(int argc, char** argv) {
     }
   }
   cout << "done." << endl;
+
+  // Create and configure the termination action
+  g2o::SparseOptimizerTerminateAction* terminateAction = new g2o::SparseOptimizerTerminateAction();
+  terminateAction->setGainThreshold(1e-4);
+  optimizer.addPostIterationAction(terminateAction);
 
   cout << "Initializing ... " << flush;
   optimizer.initializeOptimization();
