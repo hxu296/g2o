@@ -29,7 +29,6 @@
 #include <cassert>
 #include <iostream>
 #include <string_view>
-#include <chrono>
 
 #include "g2o/autodiff/autodiff.h"
 #include "g2o/core/auto_differentiation.h"
@@ -282,7 +281,6 @@ int main(int argc, char** argv) {
   string outputFilename;
   string inputFilename;
   string statsFilename;
-  double relativeErrorThreshold = 0.0001;
   g2o::CommandArgs arg;
   arg.param("i", maxIterations, 5, "perform n iterations");
   arg.param("o", outputFilename, "", "write points into a vrml file");
@@ -323,6 +321,7 @@ int main(int argc, char** argv) {
       new g2o::OptimizationAlgorithmLevenberg(
           std::make_unique<BalBlockSolver>(std::move(linearSolver)));
 
+  // solver->setUserLambdaInit(1);
   optimizer.setAlgorithm(solver);
   if (statsFilename.size() > 0) {
     optimizer.setComputeBatchStatistics(true);
@@ -409,50 +408,11 @@ int main(int argc, char** argv) {
   cout << "done." << endl;
   optimizer.setVerbose(verbose);
   cout << "Start to optimize" << endl;
+  optimizer.optimize(maxIterations);
 
-  // Start time measurement
-  double cumulativeTime = 0.0;
-
-  // Implement the optimization loop with a relative error check
-  double previousError = std::numeric_limits<double>::max();
-  double currentError = calculateMeanSquaredError(optimizer);
-  int iteration = 0;
-
-  while (iteration < maxIterations) {
-    // Perform one iteration of optimization
-    auto iterationStartTime = std::chrono::high_resolution_clock::now();
-    optimizer.optimize(1);
-    auto iterationEndTime = std::chrono::high_resolution_clock::now();
-
-    // Calculate the new error
-    previousError = currentError;
-    currentError = calculateMeanSquaredError(optimizer);
-
-    // Calculate the relative error
-    double relativeError = std::abs(previousError - currentError) / previousError;
-
-    // Calculate time taken for this iteration
-    std::chrono::duration<double> iterationDuration = iterationEndTime - iterationStartTime;
-    cumulativeTime += iterationDuration.count();
-
-    // Log iteration details
-    cout << "Iteration " << iteration + 1 << ": Mean Squared Error = " << currentError
-         << ", Relative Error = " << relativeError
-         << ", Time for this iteration = " << iterationDuration.count() << " seconds"
-         << ", Cumulative Time = " << cumulativeTime << " seconds" << endl;
-
-    // Check if the relative error is below the threshold
-    if (relativeError < relativeErrorThreshold) {
-      cout << "Converged after " << iteration + 1 << " iterations with relative error = " << relativeError << endl;
-      break;
-    }
-
-    iteration++;
-  }
-
-  if (iteration == maxIterations) {
-    cout << "Reached max iterations without full convergence." << endl;
-  }
+  // Call the function to calculate the mean squared error and log it to stdout
+  double meanSquaredError = calculateMeanSquaredError(optimizer);
+  cout << "Mean Squared Error (Flattened Residual): " << meanSquaredError << endl;
 
   if (statsFilename != "") {
     cerr << "writing stats to file \"" << statsFilename << "\" ... ";
