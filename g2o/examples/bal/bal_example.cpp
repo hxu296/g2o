@@ -206,6 +206,74 @@ class EdgeObservationBAL
   G2O_MAKE_AUTO_AD_FUNCTIONS
 };
 
+double calculateMeanSquaredError(g2o::SparseOptimizer& optimizer) {
+    double totalError = 0;
+    int numObservations = 0;
+
+    // Loop through all the edges in the graph
+    for (const auto& e : optimizer.edges()) {
+        EdgeObservationBAL* edge = dynamic_cast<EdgeObservationBAL*>(e);
+        if (edge) {
+            // Get the connected vertices (camera and point)
+            const VertexCameraBAL* camera = dynamic_cast<const VertexCameraBAL*>(edge->vertex(0));
+            const VertexPointBAL* point = dynamic_cast<const VertexPointBAL*>(edge->vertex(1));
+
+            // Get the measurement (observed 2D point) and estimate (projected 2D point)
+            g2o::Vector2 measurement = edge->measurement();  // 2D observed point
+            g2o::Vector2 prediction;  // 2D predicted point (will be computed)
+
+            // Get the camera parameters
+            const g2o::bal::Vector9& cameraParams = camera->estimate();
+            const g2o::Vector3& pointParams = point->estimate();
+
+            // Compute the predicted 2D point using the same logic from the edge operator()
+            g2o::Vector3 p;
+
+            // Rodrigues' rotation formula
+            double theta = cameraParams.head<3>().norm();
+            if (theta > 0) {
+                g2o::Vector3 v = cameraParams.head<3>() / theta;
+                double cth = cos(theta);
+                double sth = sin(theta);
+                g2o::Vector3 vXp = v.cross(pointParams);
+                double vDotp = v.dot(pointParams);
+                double oneMinusCth = 1 - cth;
+                p = pointParams * cth + vXp * sth + v * vDotp * oneMinusCth;
+            } else {
+                // Taylor expansion for small theta
+                p = pointParams + cameraParams.head<3>().cross(pointParams);
+            }
+
+            // Apply camera translation
+            p += cameraParams.segment<3>(3);
+
+            // Perspective division to project into 2D
+            prediction = -p.head<2>() / p(2);
+
+            // Apply camera intrinsics (focal length, distortion)
+            double radiusSqr = prediction.squaredNorm();
+            double f = cameraParams(6);
+            double k1 = cameraParams(7);
+            double k2 = cameraParams(8);
+            double r_p = 1.0 + k1 * radiusSqr + k2 * radiusSqr * radiusSqr;
+            prediction = f * r_p * prediction;
+
+            // Compute the 2D residual (difference between prediction and measurement)
+            g2o::Vector2 residual = prediction - measurement;
+
+            // Flatten the 2D residual by squaring each component and summing
+            totalError += residual[0] * residual[0] + residual[1] * residual[1];
+
+            // Increment the number of observations by 2 (one for each component of the residual)
+            numObservations += 2;
+        }
+    }
+
+    // Compute and return the mean squared error
+    return numObservations > 0 ? totalError / numObservations : 0.0;
+}
+
+
 int main(int argc, char** argv) {
   int maxIterations;
   bool verbose;
@@ -341,6 +409,10 @@ int main(int argc, char** argv) {
   optimizer.setVerbose(verbose);
   cout << "Start to optimize" << endl;
   optimizer.optimize(maxIterations);
+
+  // Call the function to calculate the mean squared error and log it to stdout
+  double meanSquaredError = calculateMeanSquaredError(optimizer);
+  cout << "Mean Squared Error (Flattened Residual): " << meanSquaredError << endl;
 
   if (statsFilename != "") {
     cerr << "writing stats to file \"" << statsFilename << "\" ... ";
